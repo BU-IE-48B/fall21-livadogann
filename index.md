@@ -1,4 +1,4 @@
 # Example Progress Journal
 
-## Week 0 (19/10/2021)
-Here is my 5 interesting time series forecasting examples.
+## 05/11/2021
+[Here](files/homework1.html) is the report about gesture recognition and time series representations.
