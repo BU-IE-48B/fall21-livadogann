@@ -1,0 +1,339 @@
+---
+title: "Comparison of Different Representation Approaches for Time Series"
+author: "Liva Dogan"
+date: "11/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(genlasso)
+library(igraph)
+library(ggplot2)
+library(rpart)
+library(rattle)
+library(gridExtra)
+library(Metrics)
+set.seed(48)
+```
+
+### 1. Introduction
+
+The aim of this report is to observe a dataset which consists of 30 different time series, to provide two different representation methods for the dataset, which are 1D Fused Lasso approach and Regression Tree approach, and to compare these methods in terms of error rates and classification accuracy.
+
+First of all, we need to import the data and make neceessary manipulations so that the data is ready for plotting and being represented. These manipulations are adding/adjusting columns and melting the data to obtain the long format. After applying these manipulations by the following lines, we can plot the data to have an initial look:
+
+```{r manipulations, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+cbf_dataset = read.table("CBF_TRAIN.txt")
+cbf_dataset = as.data.table(cbf_dataset)
+setnames(cbf_dataset, "V1", "class")
+cbf_dataset = cbf_dataset[order(class)]
+cbf_dataset$class = as.character(cbf_dataset$class)
+cbf_dataset_with_id = cbf_dataset[, id := 1:.N]
+cbf_dataset = cbf_dataset[,-130]
+
+long_cbf = melt(cbf_dataset_with_id,id.vars=c('id','class'))
+long_cbf[,time:=as.numeric(gsub("\\D", "", variable))-1]
+long_cbf = long_cbf[,list(id, class, time, value)]
+long_cbf = long_cbf[order(id, time)]
+
+ggplot(long_cbf, aes(x = time, y = value)) + geom_line(aes(color = as.character(id))) +
+  facet_wrap(~class)
+```
+
+As we check the plots, we can say that the overall shapes fit the concept of cylinder-bell-funnel data. However, we need more than visual observation to represent the dataset. Thus, we can try the first method for the representation, which is 1D Fused Lasso.
+
+### 2. 1D Fused Lasso
+
+To be able to represent the data with 1D Fused Lasso, we need to select an appropriate lambda such that we have a balance between sum of squared errors and the fused lasso penalty. Thus, we can try cross validation with k = 10 on each time series in the dataset to find a good lambda value for each. First, let us try this method on the first time series.
+
+```{r fusedlasso example, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+example_out = trendfilter(as.numeric(cbf_dataset[1,-1]), ord = 0)
+#trendfilter() with ord=0 is equivalent to fusedlasso(). So, we use this to perform cross-validation on the output.
+example_cv = cv.trendfilter(example_out, k = 10)
+#cv.trendfilter() with k=10 helps us to apply 10-fold cross-validation on the model built above.
+```
+
+```{r lambda table, echo=FALSE}
+lambda_table  = data.table(cbind(example_cv$lambda, example_cv$err))
+setnames(lambda_table, "V1", "Lambda")
+setnames(lambda_table, "V2", "Error")
+lambda_table
+```
+
+
+We obtain 127 different lambda values with their error rates. These values can be seen on the table above. If we try to select the lambda value, we may intuitively choose the one that gives the minimum error. However, this might lead to overfitting and result in unsatisfying representation of data. As an alternative, we can choose the lambda such that it gives the 1 standard error. We can compare these two lambda values by plotting them for the first time series.
+
+```{r lambda comparison, echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow = c(1,2))
+plot(example_out, lambda = example_cv$lambda.min, main = "Lambda with Minimum Error")
+plot(example_out, lambda = example_cv$lambda.1se, main = "Lambda with 1 Standard Error")
+```
+
+As it is said before, lambda with minimum error shows the effects of smaller shifts even though it provides a better representation in terms of error. Thus, we should select the lambda value with 1 standard error.
+
+Since we know how to proceed, we can apply these steps for the whole dataset.
+
+```{r fusedlasso, include=TRUE, results='hide', warning=FALSE, message=FALSE}
+lambda_vector = vector()
+fuse_fit_vector = vector()
+
+for (i in 1:30)
+{
+  out = trendfilter(as.numeric(cbf_dataset[i, -1]), ord = 0)
+  cv = cv.trendfilter(out, k = 10)
+  lambda_vector[i] = cv$lambda.1se
+  fuse_fit_vector[(128*(i-1)+1):(128*i)] = out$fit[,match(lambda_vector[i], out$lambda)]
+}
+```
+
+```{r fusedlasso conclusion, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+lambda_vector
+long_cbf[, fuse_rep := t(fuse_fit_vector)]
+long_cbf
+```
+
+The lambda_vector shows the selected lambda values for each time series. After we apply these lambda values, we get estimates for each observation and add these estimations to the long format data in order to compare them later.
+
+We can see the visualization of this method for 3 examples taken from each class.
+
+```{r fusedlasso plot, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+plot1_1 = ggplot(long_cbf[id == 1]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = fuse_rep), color = "red") + labs(title = "Cylinder Ex. 1")
+plot1_2 = ggplot(long_cbf[id == 2]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = fuse_rep), color = "red") + labs(title = "Cylinder Ex. 2")
+plot1_3 = ggplot(long_cbf[id == 3]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = fuse_rep), color = "red") + labs(title = "Cylinder Ex. 3")
+
+plot2_1 = ggplot(long_cbf[id == 11]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = fuse_rep), color = "red") + labs(title = "Bell Ex. 1")
+plot2_2 = ggplot(long_cbf[id == 12]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = fuse_rep), color = "red") + labs(title = "Bell Ex. 2")
+plot2_3 = ggplot(long_cbf[id == 13]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = fuse_rep), color = "red") + labs(title = "Bell Ex. 3")
+
+plot3_1 = ggplot(long_cbf[id == 23]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = fuse_rep), color = "red") + labs(title = "Funnel Ex. 1")
+plot3_2 = ggplot(long_cbf[id == 24]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = fuse_rep), color = "red") + labs(title = "Funnel Ex. 2")
+plot3_3 = ggplot(long_cbf[id == 25]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = fuse_rep), color = "red") + labs(title = "Funnel Ex. 3")
+
+grid.arrange(plot1_1, plot1_2, plot1_3, plot2_1, plot2_2, plot2_3,
+             plot3_1, plot3_2, plot3_3, nrow = 3, ncol = 3)
+```
+
+### 3. Regression Tree
+
+As an alternative to 1D Fused Lasso method, we can build regression trees for each time series by taking time as regressor. However, we need to determine the parameters for tree to obtain the best possible representation. As the task instruction states, we need to find the optimum maxdepth with minsplit=20, minbucket=10 and cp=0.
+
+Firstly, we need to determine the algorithm. In order to do this, we can take our first time series as an example and build the algorithm. At first, we can try to build a tree with maxdepth=3.
+
+```{r tree example 1, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+ex_tree1 = rpart(value~time, long_cbf[id == 1],
+                control = rpart.control(minsplit = 20, minbucket = 10, cp = 0, maxdepth = 3))
+fancyRpartPlot(ex_tree1)
+```
+
+The rpart() function holds a table called "cptable" in the object, which shows the error and standard deviation for each cp value starting from an initial value to zero at the end.Since we are trying to obtain the optimum maxdepth while cp=0, we can use the cptable where cp=0 for different maxdepth values. To illustrate this, let us build another tree for the first time series with another maxdepth value.
+
+```{r tree example 2, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+ex_tree2 = rpart(value~time, long_cbf[id == 1],
+                control = rpart.control(minsplit = 20, minbucket = 10, cp = 0, maxdepth = 12))
+fancyRpartPlot(ex_tree2)
+```
+
+Since we have two different regression trees, we can compare their error by checking cptable of each one.
+
+```{r cptable, echo=TRUE}
+ex_tree1$cptable
+ex_tree2$cptable
+```
+
+If we check the both cptable, we can see that second table has smaller xerror given that cp=0. Thus, we can conclude that maxdepth=12 gives a better tree compared to maxdepth=3.
+
+Since we prepared the maxdepth selection method, we can apply this to all of the time series. But, we need to define the range for maxdepth. The lower and upper bounds of maxdepth in rpart() are 1 and 30, respectively. So, we can try each maxdepth in [1, 30] closed range.
+
+```{r tree, include=TRUE, results='hide', warning=FALSE, message=FALSE}
+depth_vector = vector()
+tree_fit_vector = vector()
+
+for (i in 1:30)
+{
+  xerror_vector = vector()
+  for (j in 1:30)
+  {
+    base_tree = rpart(value~time, long_cbf[id == i], control = 
+                        rpart.control(minsplit = 20, minbucket = 10, cp = 0, maxdepth = j))
+    xerror_vector[j] = base_tree$cptable[which.min(base_tree$cptable[, "CP"]), "xerror"]
+  }
+  opt_depth = which.min(xerror_vector)
+  depth_vector[i] = opt_depth
+  opt_tree = rpart(value~time, long_cbf[id == i], control = 
+                     rpart.control(minsplit = 20, minbucket = 10, cp = 0, maxdepth = opt_depth))
+  tree_fit_vector[(128*(i-1)+1):(128*i)] = predict(opt_tree, long_cbf[id == i])
+}
+```
+
+```{r tree conclusion, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+depth_vector
+long_cbf[, tree_rep := t(tree_fit_vector)]
+long_cbf
+```
+
+The depth_vector shows the selected maxdepth for each time series. After we set maxdepth parameters with these values, we get estimates for each observation and add these estimations to the long format data in order to compare them later.
+
+We can see the visualization of this method for 3 examples taken from each class.
+
+```{r tree plot, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+plot1_1 = ggplot(long_cbf[id == 1]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = tree_rep), color = "red") + labs(title = "Cylinder Ex. 1")
+plot1_2 = ggplot(long_cbf[id == 2]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = tree_rep), color = "red") + labs(title = "Cylinder Ex. 2")
+plot1_3 = ggplot(long_cbf[id == 3]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = tree_rep), color = "red") + labs(title = "Cylinder Ex. 3")
+
+plot2_1 = ggplot(long_cbf[id == 11]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = tree_rep), color = "red") + labs(title = "Bell Ex. 1")
+plot2_2 = ggplot(long_cbf[id == 12]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = tree_rep), color = "red") + labs(title = "Bell Ex. 2")
+plot2_3 = ggplot(long_cbf[id == 13]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = tree_rep), color = "red") + labs(title = "Bell Ex. 3")
+
+plot3_1 = ggplot(long_cbf[id == 23]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = tree_rep), color = "red") + labs(title = "Funnel Ex. 1")
+plot3_2 = ggplot(long_cbf[id == 24]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = tree_rep), color = "red") + labs(title = "Funnel Ex. 2")
+plot3_3 = ggplot(long_cbf[id == 25]) + geom_point(aes(x = time, y = value), shape = 1) + 
+  geom_line(aes(x = time, y = tree_rep), color = "red") + labs(title = "Funnel Ex. 3")
+
+grid.arrange(plot1_1, plot1_2, plot1_3, plot2_1, plot2_2, plot2_3,
+             plot3_1, plot3_2, plot3_3, nrow = 3, ncol = 3)
+```
+
+### 4. Comparison of Two Methods
+
+Since we have two different representation methods with their estimations, we can compare these methods to see which one works better. One way to perform such a comparison is to compare the mean squared errors for each method.
+
+```{r mse, echo=FALSE}
+fuse_mse = vector()
+tree_mse = vector()
+
+for (i in 1:30)
+{
+  fuse_mse[i] = mse(long_cbf[id == i]$value, long_cbf[id == i]$fuse_rep)
+  tree_mse[i] = mse(long_cbf[id == i]$value, long_cbf[id == i]$tree_rep)
+}
+
+par(mfrow = c(1,2))
+boxplot(fuse_mse, main = "1D Fused Lasso", ylim = c(0.05, 0.25))
+boxplot(tree_mse, main = "Regression Tree", ylim = c(0.05, 0.25))
+```
+
+Since we calculated the MSE values of each method for each time series, we can make a comparison between them. One way to do this comparison is checking the boxplots. If we observe the boxplots above, we can say that the plot on the right hand side has better median, lower and upper quartile values. Thus, we can conclude that regression tree method provides a slightly better representation compared to 1D Fused Lasso Method.
+
+### 5. 1-NN Classification
+
+1-NN classification is a prediction method based on calculating distance between the attributes of different objects to determine the class of the new object. In this task we will calculate distances in three different way: distance between values and raw input data, distance between values and estimates from 1D Fused Lasso representation and distance between values and estimates from regression tree representation. While calculating distance, we may use the Euclidian distance. We can define the distance function as:
+
+```{r euclidian, include=TRUE, results='hide', warning=FALSE, message=FALSE}
+euclidian = function(x, y)
+{
+  distance = 0
+  for (i in 1:length(x))
+  {
+    distance = distance + (x[i] - y[i])^2
+  }
+  return(sqrt(distance))
+}
+```
+
+Now, we can calculate the distances that are mentioned above. Since we are calculating the distance between time series which are in the same dataset, we need to be careful about the distance between the same time series. Since 1-NN classification chooses the class of the closest object, it will always return the class of itself if we calculate distance of an object to itself, which will lead to wrong classification model. Thus, we need to arrange the algorithm so that this problem will not occur.
+
+```{r 1-nn, include=TRUE, results='hide', warning=FALSE, message=FALSE}
+rawdata_distance_matrix = matrix(NA, nrow = 30, ncol = 30)
+fuse_distance_matrix = matrix(NA, nrow = 30, ncol = 30)
+tree_distance_matrix = matrix(NA, nrow = 30, ncol = 30)
+
+rawdata_1nn = vector()
+fuse_1nn = vector()
+tree_1nn = vector()
+
+for (i in 1:30)
+{
+  for (j in 1:30)
+  {
+    if (i == j)
+      next()
+    else
+    {
+      rawdata_distance_matrix[i,j] = euclidian(long_cbf[id == i]$value, long_cbf[id == j]$value)
+      fuse_distance_matrix[i,j] = euclidian(long_cbf[id == i]$value, long_cbf[id == j]$fuse_rep)
+      tree_distance_matrix[i,j] = euclidian(long_cbf[id == i]$value, long_cbf[id == j]$tree_rep)
+    }
+  }
+  rawdata_1nn[i] = cbf_dataset[which.min(rawdata_distance_matrix[i,]),class]
+  fuse_1nn[i] = cbf_dataset[which.min(fuse_distance_matrix[i,]),class]
+  tree_1nn[i] = cbf_dataset[which.min(tree_distance_matrix[i,]),class]
+}
+```
+
+Now, we can gather the information collected above to see how it worked.
+
+```{r 1-nn comparison, echo=FALSE}
+compare_table = cbind(cbf_dataset$class, rawdata_1nn, fuse_1nn, tree_1nn)
+compare_table = data.table(compare_table)
+setnames(compare_table, "V1", "class")
+compare_table
+```
+
+One way to comment on the accuracy of classifications is to calculate the fraction of correct estimations.
+
+```{r nn-accuracy, echo=FALSE}
+nn_accuracy = function(x, y)
+{
+  counter = 0
+  for (i in 1:length(x))
+  {
+    if (x[i] == y[i])
+      counter = counter + 1
+  }
+  return(counter/length(x))
+}
+
+accuracy_table = data.table(cbind(nn_accuracy(compare_table$class, compare_table$rawdata_1nn),
+                       nn_accuracy(compare_table$class, compare_table$fuse_1nn),
+                       nn_accuracy(compare_table$class, compare_table$tree_1nn)))
+setnames(accuracy_table, "V1", "Raw Data")
+setnames(accuracy_table, "V2", "Fused Lasso")
+setnames(accuracy_table, "V3", "Reg. Tree")
+accuracy_table
+```
+
+If we compare the accuracy of these 3 methods, we can say that Fused Lasso and regression tree representations work better than raw data if we want to use 1-NN classification.
+
+### 6. Conclusion
+
+In this report, we observed two different representation methods, which are 1D Fused Lasso and regression tree. Firstly, we inspect these representations visually by checking the plots and both of them managed to represent the overall shape of time series. Then, we compared them in a more objective way, i.e. by comparing the MSE values for each representation method. After comparing the boxplots of MSE values, we concluded that regression tree representation performs better in terms of MSE. After that, we prepared a 1-NN classification method with three different inputs: raw data, fused lasso estimates and regression tree estimates. When we calculated the fraction of correct classifications, we saw that fused lasso and regression tree representations have the same accuracy and a better performance compared to raw data.
+
+In conclusion, if we are trying to select the best representation method for this scenario, we can select the regression tree since it has the best performance overall.
+
+### 7. References
+
+*https://cran.r-project.org/web/packages/genlasso/vignettes/article.pdf
+
+To reach the RMD file, please click [here](https://bu-ie-48b.github.io/fall21-livadogann/files/homework2.Rmd)
+
+
+
+
+
+
+
+
+
+
+
+
+
