@@ -5,3 +5,6 @@
 
 ## 21/11/2021 - HW2
 [Here](files/homework2.html) is the report about comparison of different representation approaches for time series.
+
+## 13/12/2021 - HW3
+[Here](files/homework3.html) is the report about comparison of different representation approaches for time series.
