@@ -149,7 +149,7 @@ In conclusion, the goal of predicting the sign of electricity balance in the mar
 
 To reach the RMD file, please click [here](https://bu-ie-48b.github.io/fall21-livadogann/files/IE48B_Project_Report_Group3.RMD)
 
-To reach the source code of all models that are tried, please click [here](https://bu-ie-48b.github.io/fall21-livadogann/files/IE48B_Project_AllModels.R)
+To reach the source code of all models that are tried, please click [here](https://bu-ie-48b.github.io/fall21-livadogann/files/IE48B_Project_Group3_AllModels.R)
 
 To reach the source code of the model used for submission, please click [here](https://bu-ie-48b.github.io/fall21-livadogann/files/IE48B_Project_Group3_FinalModel.R)
 
