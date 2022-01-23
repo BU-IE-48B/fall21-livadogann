@@ -8,3 +8,6 @@
 
 ## 13/12/2021 - HW3
 [Here](files/homework3.html) is the report about comparison of different representation approaches for time series.
+
+## 23/12/2022 - Group 3 Project
+[Here](files/IE48B_Project_Report_Group3.html) is the project report of Group 3.
